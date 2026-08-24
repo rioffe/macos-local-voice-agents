@@ -122,6 +122,45 @@ After you run the first time and have all the models cached, you can set the HF_
 HF_HUB_OFFLINE=1 uv run bot.py
 ```
 
+# Configuration
+
+The bot is fully configurable — **no code edits** to swap models or tune knobs. Every option is a field in the `Config` dataclass in [`server/config.py`](server/config.py) with a built-in default, so a zero-config run is identical to the original hard-coded behaviour. Values resolve in order **command-line flag > env / `.env` > default**, and the bot logs the *resolved* config on startup so you can confirm which value won.
+
+Copy `server/env.example` → `server/.env` and uncomment what you want, or flip a single option on the command line:
+
+```shell
+# swap to a different LLM (a tag from `ollama list`)
+uv run bot.py --llm-model qwen3:8b
+
+# a different voice + a bigger STT model, and turn metrics off
+uv run bot.py --tts-voice am_michael --stt-model mlx-community/whisper-large-v3-turbo --no-metrics
+
+# run a custom system prompt from a file
+uv run bot.py --system-prompt-file ./prompts/assistant.md
+
+# list every option
+uv run bot.py --help
+```
+
+Key variables (the full list + descriptions live in [`server/config.py`](server/config.py); `bot.py --help` prints them too):
+
+| Variable (env) | Flag | Default | Purpose |
+| --- | --- | --- | --- |
+| `LLM_MODEL` | `--llm-model` | `gemma3n:e4b` | Ollama / OpenAI-compatible model tag |
+| `LLM_BASE_URL` | `--llm-base-url` | `http://127.0.0.1:11434/v1` | LLM endpoint |
+| `LLM_MAX_TOKENS` | `--llm-max-tokens` | `4096` | Max LLM output tokens |
+| `STT_MODEL` | `--stt-model` | `.../whisper-large-v3-turbo-q4` | MLX Whisper id / `MLXModel` name |
+| `TTS_MODEL` | `--tts-model` | `.../Kokoro-82M-bf16` | TTS engine (Kokoro/Marvis, auto-picked by name) |
+| `TTS_VOICE` | `--tts-voice` | `af_heart` | Kokoro voice id |
+| `TTS_SAMPLE_RATE` | `--tts-sample-rate` | `24000` | TTS output sample rate |
+| `VAD_STOP_SECS` | `--vad-stop-secs` | `0.2` | Silence (s) that ends a turn |
+| `SMART_TURN_MODEL` | `--smart-turn-model` | `""` | End-of-turn model path (`""` = download) |
+| `SYSTEM_PROMPT(_FILE)` | `--system-prompt[-file]` | built-in | Chat prompt |
+| `AGGREGATION_TIMEOUT` | `--aggregation-timeout` | `0.05` | User transcript coalescence (Whisper is non-streaming) |
+| `ICE_SERVERS` | `--ice-servers` | google STUN | Comma/separated STUN/TURN URLs |
+| `ENABLE(_METRICS_)_[USAGE]_` | `--no-metrics` / `--no-usage-metrics` | `true` | Pipeline / usage metrics |
+| `BOT_HOST` / `BOT_PORT` | `--host` / `--port` | `localhost` / `7860` | HTTP bind |
+
 # Start the web client
 
 The web client is a React app. You can connect to your local macOS agent using any client that can negotiate a serverless WebRTC connection. The client in this repo is based on [voice-ui-kit](https://github.com/pipecat-ai/voice-ui-kit) and just uses that library's standard debug console template.
