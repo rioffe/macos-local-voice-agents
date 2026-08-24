@@ -20,6 +20,22 @@ The bot and web client here communicate using a low-latency, local, serverless W
 
 For a deep dive into voice AI, including network transport, optimizing for latency, and notes on designing tool calling and complex workflows, see the [Voice AI & Voice Agents Illustrated Guide](https://voiceaiandvoiceagents.com/).
 
+# Architecture (deep dive)
+
+For a full architecture overview — a high-level layer map, the detailed per-hop data flow, the Pipecat pipeline, WebRTC signaling & connection lifecycle, and the isolated-TTS protocol — see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). It ends with **Appendix A**, a glossary that defines every abbreviation, protocol, framework, and model name used in the project.
+
+A rendered PDF of it can be built from the repo with the vendored `md2pdf.sh` wrapper via the `Makefile`:
+
+```shell
+# Crisp, *vector* diagrams at 0.5in margins -> docs/ARCHITECTURE.pdf
+make
+
+# Override the page margin:
+make MARGIN=0.3in
+```
+
+This runs `sh md2pdf.sh --toc --mermaid --margin 0.5in docs/ARCHITECTURE.md`. The `--mermaid` flag draws each Mermaid diagram as a **vector PDF** (crisp at any zoom) rather than a low-res raster. The generated `docs/ARCHITECTURE.pdf` is a build artifact and is git-ignored — it's reproducible with `make`.
+
 # Models and dependencies
 
 Silero VAD and MLX Whisper run inside the Pipecat process. When the agent code starts, it will need to download model weights that aren't already cached, so first startup can take some time.
@@ -42,7 +58,7 @@ ollama list
 
 # Run the voice agent
 
-The core voice agent code lives in a single file: [server/bot.py](server/bot.py). There's one custom service here that's not included in Pipecat core: we implemented a local MLX-Audio frame processor on top of the excellent [mlx-audio library](https://github.com/Blaizzy/mlx-audio).
+The core voice agent code lives in a single file: [server/bot.py](server/bot.py). There's one custom service here that's not included in Pipecat core: we implemented a local MLX-Audio frame processor on top of the excellent [mlx-audio library](https://github.com/Blaizzy/mlx-audio). It's `TTSMLXIsolated`, which runs the actual TTS synthesis in an **isolated subprocess** (`kokoro_worker.py` for Kokoro, `marvis_worker.py` for Marvis, chosen by model name; a simple JSON-over-stdio protocol) to sidestep MLX/Metal threading conflicts on Apple Silicon. See the *Isolated TTS (avoiding Metal threading conflicts)* section of the architecture doc for the full protocol.
 
 Note that the first time you start the bot it will take some time to initialize the three models. It can be 30 seconds or more before the bot is fully ready to go. Subsequent startups will be much faster.
 
