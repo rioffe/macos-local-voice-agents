@@ -43,8 +43,6 @@ import signal
 import subprocess
 import sys
 import time
-from dataclasses import fields
-
 from PyQt5 import QtCore, QtGui, QtWidgets
 
 # --- Locate the server dir and reuse its Config snapshot --------------------
@@ -136,6 +134,155 @@ GROUPS = [
 
 RUNNER_AUTO, RUNNER_UV, RUNNER_VENV, RUNNER_PY = "auto", "uv", "venv", "python"
 
+# --- Presentation (stylesheet) ----------------------------------------------
+# Let Qt use the native platform font (SF on macOS, Segoe/Roboto elsewhere);
+# only a fixed size is forced so we avoid aliasing a -apple-system family
+# under the forced Fusion style. QSS supports /* */ but not # comments.
+STYLESHEET = """
+* {
+    font-size: 13px;
+}
+QWidget#Root {
+    background: #f4f6f9;
+}
+QWidget#Header {
+    background: #ffffff;
+    border: 1px solid #e4e7ec;
+    border-radius: 12px;
+}
+QLabel {
+    color: #2a2f35;
+    background: transparent;
+}
+QLabel#Title {
+    font-size: 18px;
+    font-weight: 700;
+    color: #14181d;
+}
+QLabel#Subtitle {
+    font-size: 12px;
+    color: #7b838d;
+}
+QGroupBox {
+    background: #ffffff;
+    border: 1px solid #e4e7ec;
+    border-radius: 12px;
+    margin-top: 18px;
+    padding: 2px;
+}
+QGroupBox::title {
+    subcontrol-origin: margin;
+    subcontrol-position: top left;
+    left: 16px;
+    padding: 0 6px;
+    color: #2b3038;
+    font-weight: 600;
+    font-size: 12.5px;
+}
+QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox {
+    background: #ffffff;
+    border: 1px solid #d5dae1;
+    border-radius: 7px;
+    padding: 4px 7px;
+    selection-background-color: #4a9bff;
+    selection-color: #ffffff;
+}
+QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus {
+    border: 1px solid #4a9bff;
+}
+QComboBox::drop-down {
+    subcontrol-position: right;
+    width: 18px;
+    border: none;
+}
+QPushButton {
+    background: #ffffff;
+    border: 1px solid #d5dae1;
+    border-radius: 8px;
+    padding: 6px 13px;
+    min-width: 56px;
+    color: #2a2f35;
+}
+QPushButton:hover {
+    background: #f1f4f8;
+    border-color: #c4cbd4;
+}
+QPushButton:pressed {
+    background: #e7ecf3;
+}
+QPushButton:disabled {
+    background: #f7f8fa;
+    border-color: #e2e5ea;
+    color: #a7adb5;
+}
+QPushButton#Primary {
+    background: #1f7a53;
+    border: 1px solid #1f7a53;
+    color: #ffffff;
+    font-weight: 600;
+}
+QPushButton#Primary:hover {
+    background: #22885b;
+    border-color: #22885b;
+}
+QPushButton#Primary:disabled {
+    background: #cfd4d9;
+    border-color: #cfd4d9;
+    color: #ffffff;
+}
+QPushButton#Danger {
+    color: #c0392b;
+    border: 1px solid #e7b8b5;
+}
+QPushButton#Danger:hover {
+    background: #fdeeee;
+}
+QPushButton#Danger:disabled {
+    color: #b6bcc3;
+    border-color: #e2e5ea;
+}
+QTextEdit#LogView {
+    background: #1b1e23;
+    color: #d4d8dd;
+    border: 1px solid #2a2e35;
+    border-radius: 10px;
+    font-family: Menlo, Monaco, "Courier New", monospace;
+    font-size: 12px;
+}
+QCheckBox {
+    background: transparent;
+    spacing: 8px;
+}
+QStatusBar {
+    background: #ffffff;
+    border-top: 1px solid #e4e7ec;
+}
+QStatusBar::item {
+    border: none;
+}
+QLabel#StatusPill, QLabel#UrlPill {
+    border: 1px solid #dde1e6;
+    border-radius: 11px;
+    padding: 3px 12px;
+    font-weight: 600;
+}
+QLabel#UrlPill {
+    background: #eef0f3;
+    color: #4a5057;
+}
+"""
+
+STATUS_RUNNING = (
+     "QLabel { color: #1f7a53; background: #e3f4ea; "
+     "border: 1px solid #b7e0c9; border-radius: 11px; "
+     "padding: 3px 12px; font-weight: 600; }"
+)
+STATUS_STOPPED = (
+     "QLabel { color: #6b7178; background: #eef0f3; "
+     "border: 1px solid #dde1e6; border-radius: 11px; "
+     "padding: 3px 12px; font-weight: 600; }"
+)
+
 
 def _effective_value(name: str):
     """The current effective value of a Config field (or None if unknown)."""
@@ -169,11 +316,89 @@ class ReaderThread(QtCore.QThread):
         self.exited.emit(int(code))
 
 
+class _FlowLayout(QtWidgets.QLayout):
+    """A left-to-right, top-to-bottom *wrapping* layout for the action bar.
+
+    Keeps every control on one row while the window is wide enough, and
+    reflows onto new rows instead of eliding button text when the window is
+    narrowed -- so the toolbar never clips.
+    """
+
+    def __init__(self, parent=None, margin=0, hspacing=10, vspacing=10):
+        super().__init__(parent)
+        self._items = []
+        self._h = hspacing
+        self._v = vspacing
+        if margin >= 0:
+            self.setContentsMargins(margin, margin, margin, margin)
+
+    def horizontalSpacing(self) -> int:
+        return self._h
+
+    def verticalSpacing(self) -> int:
+        return self._v
+
+    def addItem(self, item) -> None:
+        self._items.append(item)
+
+    def count(self) -> int:
+        return len(self._items)
+
+    def itemAt(self, index: int):
+        return self._items[index] if 0 <= index < len(self._items) else None
+
+    def takeAt(self, index: int):
+        return self._items.pop(index) if 0 <= index < len(self._items) else None
+
+        # The toolbar fills the available width; its height is driven by
+        # heightForWidth() as it wraps. Qt.Horizontal is a single flag that
+        # exists on every PyQt5 build, so it is the most portable choice.
+        return QtCore.Qt.Horizontal
+
+    def hasHeightForWidth(self) -> bool:
+        return True
+
+    def _width(self) -> int:
+        pw = self.parentWidget()
+        return pw.width() if pw and pw.width() > 0 else 600
+
+    def sizeHint(self) -> QtCore.QSize:
+        return QtCore.QSize(0, self.heightForWidth(self._width()))
+
+    def minimumSize(self) -> QtCore.QSize:
+        return QtCore.QSize(0, self.heightForWidth(self._width()))
+
+    def heightForWidth(self, width: int) -> int:
+        return self._do_layout(QtCore.QRect(0, 0, width, 0), test_only=True)
+
+    def setGeometry(self, rect: "QtCore.QRect") -> None:
+        super().setGeometry(rect)
+        self._do_layout(rect, test_only=False)
+
+    def _do_layout(self, rect: "QtCore.QRect", test_only: bool) -> int:
+        x, y = rect.x(), rect.y()
+        line_height = 0
+        gap = self.horizontalSpacing()
+        for it in self._items:
+            w = it.sizeHint().width()
+            newx = x + w + gap
+            if newx - gap > rect.right() + 1 and line_height > 0:
+                x, y = rect.x(), y + line_height + self.verticalSpacing()
+                newx = x + w + gap
+                line_height = 0
+            if not test_only:
+                it.setGeometry(QtCore.QRect(
+                    x, y, it.sizeHint().width(), it.sizeHint().height()))
+            x = newx
+            line_height = max(line_height, it.sizeHint().height())
+        return y + line_height - rect.y()
+
+
 class BotControlPanel(QtWidgets.QMainWindow):
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("macOS Local Voice Agent - Control Panel")
-        self.resize(760, 860)
+        self.setWindowTitle("macOS Local Voice Agent — Control Panel")
+        self.resize(880, 720)
 
         self.widgets: dict[str, QtWidgets.QWidget] = {}
             # The bot runs as a child in its own process group (see start_bot),
@@ -188,20 +413,49 @@ class BotControlPanel(QtWidgets.QMainWindow):
     # --- UI construction ----------------------------------------------------
     def _build_ui(self) -> None:
         central = QtWidgets.QWidget()
+        central.setObjectName("Root")
         self.setCentralWidget(central)
         root = QtWidgets.QVBoxLayout(central)
+        root.setContentsMargins(18, 18, 18, 12)
+        root.setSpacing(12)
 
+        self._build_header(root)
         self._build_form(root)
         self._build_log(root)
         self._build_actions(root)
         self._build_statusbar()
 
+    def _build_header(self, parent_layout: "QtWidgets.QVBoxLayout") -> None:
+        host = QtWidgets.QWidget()
+        host.setObjectName("Header")
+        lay = QtWidgets.QVBoxLayout(host)
+        lay.setContentsMargins(16, 14, 16, 14)
+        lay.setSpacing(3)
+        title = QtWidgets.QLabel("macOS Local Voice Agent")
+        title.setObjectName("Title")
+        sub = QtWidgets.QLabel(
+            "Local LLM   ·  MLX STT   ·  TTS   —  WebRTC control surface"
+        )
+        sub.setObjectName("Subtitle")
+        lay.addWidget(title)
+        lay.addWidget(sub)
+        parent_layout.addWidget(host)
+
     def _build_form(self, parent_layout: "QtWidgets.QVBoxLayout") -> None:
+        # Every section lives *inside* one scroll area. The old code added each
+        # group box to the parent layout as a sibling of the (empty) scroll area,
+        # which left a large blank region at the top of the window -- fixed.
         scroll = QtWidgets.QScrollArea()
         scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QtWidgets.QFrame.NoFrame)
+        scroll.setStyleSheet("QScrollArea, QScrollArea > QWidget { background: transparent; }")
+
         form_host = QtWidgets.QWidget()
-        parent_layout.addWidget(scroll, 1)
+        form_host.setStyleSheet("background: transparent;")
         form = QtWidgets.QFormLayout(form_host)
+        form.setContentsMargins(0, 0, 0, 0)
+        form.setSpacing(6)
+        form.setLabelAlignment(QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter)
 
         self.form = form
         scroll.setWidget(form_host)
@@ -209,9 +463,14 @@ class BotControlPanel(QtWidgets.QMainWindow):
         for title, items in GROUPS:
             box = QtWidgets.QGroupBox(title)
             box_form = QtWidgets.QFormLayout(box)
+            box_form.setContentsMargins(16, 8, 16, 14)
+            box_form.setSpacing(9)
+            box_form.setLabelAlignment(QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter)
             for name, label, kind in items:
                 self._add_field(box_form, name, label, kind)
-            parent_layout.addWidget(box)
+            form.addWidget(box)             # into the scroll area, not the parent
+
+        parent_layout.addWidget(scroll, 1)
 
     def _add_field(self, form: "QtWidgets.QFormLayout", name: str,
                    label: str, kind: str) -> None:
@@ -250,36 +509,50 @@ class BotControlPanel(QtWidgets.QMainWindow):
         return row
 
     def _build_log(self, parent_layout: "QtWidgets.QVBoxLayout") -> None:
-        log_host = QtWidgets.QGroupBox("Logs")
+        log_host = QtWidgets.QGroupBox("Live output")
         log_v = QtWidgets.QVBoxLayout(log_host)
+        log_v.setContentsMargins(14, 12, 14, 12)
         self.log_view = QtWidgets.QTextEdit()
+        self.log_view.setObjectName("LogView")
         self.log_view.setReadOnly(True)
-        self.log_view.setStyleSheet("QTextEdit { background: #1e1e1e; color: #d4d4d4; }")
+        self.log_view.setPlaceholderText("Server output will stream here…")
+        self.log_view.setMinimumHeight(170)
         log_v.addWidget(self.log_view)
-        parent_layout.addWidget(log_host, 1)
+        parent_layout.addWidget(log_host)
 
     def _build_actions(self, parent_layout: "QtWidgets.QVBoxLayout") -> None:
-        bar = QtWidgets.QHBoxLayout()
-        self.run_btn = QtWidgets.QPushButton("Start")
-        self.stop_btn = QtWidgets.QPushButton("Stop")
+        # A wrapping flow layout keeps every control on one row while the
+        # window is wide enough and reflows onto new rows instead of clipping.
+        bar = _FlowLayout(margin=2, hspacing=10, vspacing=10)
+
+        self.run_btn = QtWidgets.QPushButton("▶  Start")
+        self.run_btn.setObjectName("Primary")
+        self.stop_btn = QtWidgets.QPushButton("■  Stop")
+        self.stop_btn.setObjectName("Danger")
         self.open_btn = QtWidgets.QPushButton("Open web client")
+        self.clear_btn = QtWidgets.QPushButton("Clear logs")
         self.save_btn = QtWidgets.QPushButton("Save .env")
-        self.clear_btn = QtWidgets.QPushButton("Clear")
+
         self.runner_combo = QtWidgets.QComboBox()
         for r in [RUNNER_AUTO, RUNNER_UV, RUNNER_VENV, RUNNER_PY]:
             self.runner_combo.addItem(r, r)
-        run_row = QtWidgets.QHBoxLayout()
-        run_row.addWidget(self.run_btn)
-        run_row.addWidget(self.stop_btn)
-        run_row.addWidget(self.open_btn)
-        run_row.addWidget(self.clear_btn)
-        run_row.addStretch()
-        stop_row = QtWidgets.QHBoxLayout()
-        stop_row.addWidget(self.save_btn)
-        stop_row.addStretch()
-        stop_row.addWidget(self.runner_combo)
-        parent_layout.addLayout(run_row)
-        parent_layout.addLayout(stop_row)
+        self.runner_combo.setFixedWidth(132)
+        self.runner_combo.setToolTip(
+            "Interpreter used to launch bot.py "
+            "— auto picks uv, else the project venv, else python")
+
+        bar.addWidget(self.run_btn)
+        bar.addWidget(self.stop_btn)
+        bar.addWidget(self.open_btn)
+        bar.addWidget(self.clear_btn)
+        bar.addWidget(self.save_btn)
+
+        runner_label = QtWidgets.QLabel("Runner")
+        runner_label.setStyleSheet("QLabel { color: #7b838d; font-weight: 600; }")
+        bar.addWidget(runner_label)
+        bar.addWidget(self.runner_combo)
+
+        parent_layout.addLayout(bar)
 
         self.run_btn.clicked.connect(self.start_bot)
         self.stop_btn.clicked.connect(self.stop_bot)
@@ -289,14 +562,19 @@ class BotControlPanel(QtWidgets.QMainWindow):
 
     def _build_statusbar(self) -> None:
         self.status_label = QtWidgets.QLabel("stopped")
-        self.status_label.setFrameShape(QtWidgets.QFrame.Box)
+        self.status_label.setObjectName("StatusPill")
         self.url_label = QtWidgets.QLabel("")
+        self.url_label.setObjectName("UrlPill")
+
         bar = QtWidgets.QHBoxLayout()
+        bar.setContentsMargins(0, 0, 0, 0)
+        bar.setSpacing(10)
         bar.addWidget(self.status_label)
         bar.addWidget(self.url_label)
-        bar.addStretch()
         wrap = QtWidgets.QWidget()
         wrap.setLayout(bar)
+
+        self.statusBar().setContentsMargins(14, 6, 14, 6)
         self.statusBar().addPermanentWidget(wrap)
 
 
@@ -379,12 +657,8 @@ class BotControlPanel(QtWidgets.QMainWindow):
         self.stop_btn.setEnabled(running)
         self.open_btn.setEnabled(not running)
         self.runner_combo.setEnabled(not running)
-        self.status_label.setText("running" if running else "stopped")
-        self.status_label.setStyleSheet(
-            "QLabel { background: #c8e6c9; padding: 3px 10px; }"
-            if running else
-            "QLabel { background: #eeeeee; padding: 3px 10px; }"
-        )
+        self.status_label.setText("●  running" if running else "◌  stopped")
+        self.status_label.setStyleSheet(STATUS_RUNNING if running else STATUS_STOPPED)
         host = self._value("host") or "localhost"
         port = self._value("port") or "7860"
         self.url_label.setText(f"http://{host}:{port}   (POST /api/offer)")
@@ -402,7 +676,6 @@ class BotControlPanel(QtWidgets.QMainWindow):
         wid = self.widgets.get(name)
         if wid is None:
             return None
-        kind = next((k for _, items in GROUPS for n, _, k in items if n == name), "text")
         if isinstance(wid, QtWidgets.QCheckBox):
             return wid.isChecked()
         if isinstance(wid, QtWidgets.QSpinBox):
@@ -584,7 +857,11 @@ def _quoted(s: str) -> str:
 
 def main() -> None:
     app = QtWidgets.QApplication(sys.argv)
-    app.setApplicationName("MacOS Local Voice Agent")
+    app.setApplicationName("macOS Local Voice Agent")
+    # Fusion gives a consistent, fully-themed look under our stylesheet on every
+    # platform (the native macOS style would fight some of the QSS rules).
+    app.setStyle("Fusion")
+    app.setStyleSheet(STYLESHEET)
     win = BotControlPanel()
     win.show()
     sys.exit(app.exec_())
