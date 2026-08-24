@@ -1,23 +1,41 @@
 [project]
 name = "macos-local-voice-agents-server"
 version = "0.1.0"
-description = "Local voice agents server for macOS"
-readme = "README.md"
-requires-python = ">=3.12"
+description = "Local voice agents server for macOS (M-series)"
+requires-python = ">=3.12,<3.14"
 dependencies = [
-    "pip",
-    "python-dotenv",
-    "fastapi[all]",
-    "uvicorn",
-    "opencv-python",
-    "mlx-lm",
-    "mlx-audio",
-    "pipecat-ai[openai,deepgram,rime,silero,mlx-whisper]>=0.0.81",
-    "pipecat-ai-small-webrtc-prebuilt",
-    "aiortc",
-    "nltk",
-    "pyobjc-core",
-    "pyobjc-framework-Quartz",
-    "pyobjc-framework-Cocoa",
-    "pyobjc-framework-ApplicationServices",
+    # --- web / API layer ---
+    "fastapi[all]==0.116.1",
+    "uvicorn==0.35.0",
+    "python-dotenv==1.1.1",
+    "loguru==0.7.3",
+
+    # --- audio pipeline / WebRTC transport ---
+    "pipecat-ai[openai,deepgram,rime,silero,mlx-whisper]==0.0.81",
+    "pipecat-ai-small-webrtc-prebuilt==1.0.0",
+    "aiortc==1.13.0",
+    # aiortc depends on av, but av>=14.3.0 ships no macOS/arm64 cp312 wheel and
+    # its source build is expected to fail (needs ffmpeg 7 + build toolchain).
+    # Pin to the last version that publishes a prebuilt wheel here.
+    "av==14.2.0",
+    "opencv-python==4.12.0.88",
+    "nltk==3.9.1",
+    "numpy==2.2.6",
+
+    # --- Apple MLX stack (LLM + TTS + STT). apple-silicon only ---
+    "mlx==0.28.0",
+    "mlx-lm==0.26.3",
+    "mlx-audio==0.2.4",   # Kokoro / Marvis TTS workers + `mlx_audio.tts.generate`
+    "mlx-vlm==0.3.3",
+    "mlx-whisper==0.4.2",
+
+    # --- macOS native (audio capture / hotkeys via Quartz, etc.) ---
+    "pyobjc-core==11.1",
+    "pyobjc-framework-Quartz==11.1",
+    "pyobjc-framework-Cocoa==11.1",
+    "pyobjc-framework-ApplicationServices==11.1",
 ]
+
+[tool.uv]
+# Don't treat this as an installable package; we just need its runtime env.
+package = false

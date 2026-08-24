@@ -26,7 +26,19 @@ Silero VAD and MLX Whisper run inside the Pipecat process. When the agent code s
 
 The LLM service in this bot uses the OpenAI-compatible chat completion HTTP API. So you will need to run a local OpenAI-compatible LLM server. 
 
-One easy, high-performance, way to run a local LLM server on macOS is [LM Studio](https://lmstudio.ai/). From inside the LM Studio graphical interface, go to the "Developer" tab on the far left to start an HTTP server.
+The easiest way to run a local LLM server on macOS is [Ollama](https://ollama.com/). The bot in this repo points at Ollama by default (see `server/bot.py`), which serves an OpenAI-compatible API on `http://127.0.0.1:11434/v1`. Pull the model the bot expects and start Ollama:
+
+```shell
+ollama pull gemma3n:e4b
+
+# Start the Ollama server if it isn't already running (default port 11434)
+ollama serve
+
+# Confirm the model is available
+ollama list
+```
+
+> Other OpenAI-compatible local servers work too — for example [LM Studio](https://lmstudio.ai/). Whatever you use, make sure its `/v1` endpoint matches the `base_url` in `server/bot.py`. LM Studio's default is `http://127.0.0.1:1234/v1`; Ollama's is `http://127.0.0.1:11434/v1`.
 
 # Run the voice agent
 
@@ -34,16 +46,33 @@ The core voice agent code lives in a single file: [server/bot.py](server/bot.py)
 
 Note that the first time you start the bot it will take some time to initialize the three models. It can be 30 seconds or more before the bot is fully ready to go. Subsequent startups will be much faster.
 
-It's not a bad idea to run a quick `mlx-audio.generate` process from the command line before you run the bot the first time, so you're not waiting for a relatively bug HuggingFace model download for the voice model.
+A few of those models are loaded inside the Pipecat process *before* the first conversation, so pre-warming them makes the first startup much faster. Two of them are the speech models, and `server/preflight.py` pre-downloads and verifies both by mimicking exactly what `bot.py` does:
 
-```shell
-mlx-audio.generate --model "Marvis-AI/marvis-tts-250m-v0.1" --text "Hello, I'm Pipecat!" --output "output.wav"
-# or
-mlx-audio.generate --model "mlx-community/Kokoro-82M-bf16" --text "Hello, I'm Pipecat!" --output "output.wav"
-```
+   * **Silero VAD** — packaged inside the `pipecat` wheel itself (`pipecat/audio/vad/data/silero_vad.onnx`) and loaded via `importlib.resources`; `preflight.py` just confirms it's present and that ONNXRuntime can open it.
+   * **MLX Whisper** (`WhisperSTTServiceMLX`, `MLXModel.LARGE_V3_TURBO_Q4`) — `preflight.py` runs `mlx_whisper.transcribe` on a 3-second silent buffer, which triggers a `snapshot_download` from `mlx-community/whisper-large-v3-turbo-q4` and warms the model into MLX memory.
 
 ```shell
 cd server/
+
+# Pre-download & verify the speech models (downloads if missing, no-op if cached)
+uv run python preflight.py
+
+# Verify only, no network
+uv run python preflight.py --offline
+```
+
+For the TTS model, one more easy step: a quick generation from the command line before the first run so you're not waiting on a large HuggingFace download:
+
+The `mlx-audio` TTS entry point is the `mlx_audio.tts.generate` script. It doesn't take an `--output` flag anymore: use `--play` to speak the result immediately (and avoid writing a file), or `--file_prefix` to save it to disk.
+
+```shell
+mlx_audio.tts.generate --model "mlx-community/Kokoro-82M-bf16" \
+    --text "Once upon a midnight dreary, or something like that! It's been a long time since I left high-school" \
+    --play
+# or
+mlx_audio.tts.generate --model "Marvis-AI/marvis-tts-250m-v0.1" \
+    --text "Hello, I'm Pipecat!" \
+    --play
 ```
 
 If you're using uv
@@ -51,6 +80,14 @@ If you're using uv
 ```
 uv run bot.py
 ```
+
+> Note: `uv` does not install `pip` into the project virtual environment by default. If you need `pip` inside the `uv`-managed environment (for example to run a one-off `pip install` of an extra package), install it with:
+>
+> ```
+> uv pip install pip
+> ```
+>
+> You can then use it inside the venv, e.g. `uv run pip install some-package`. For most of this project you won't need `pip` at all — `uv run bot.py` is preferred.
 
 If you're using pip
 
