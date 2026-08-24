@@ -10,3 +10,10 @@ __pycache__
 .env.development.local
 .env.test.local
 .env.production.local
+
+# PDF build artifacts (reproducible via `make`)
+docs/*.pdf
+
+# mermaid-filter writes a stray log to the CWD on each run
+mermaid-filter.err
+*/mermaid-filter.err
